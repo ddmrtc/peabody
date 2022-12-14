@@ -1,11 +1,11 @@
 ﻿# peabody
 
 какие есть api по options
-https://polygon.io/
+* https://polygon.io/
   есть исторические данные, но нету open interest
-https://datashop.cboe.com/
+* https://datashop.cboe.com/
   кажется если все, но дорого и не понятно
-https://eodhistoricaldata.com/financial-apis/stock-options-data/
+* https://eodhistoricaldata.com/financial-apis/stock-options-data/
   нету исторических данных
 
 Получаю инфу по стокам
@@ -32,9 +32,9 @@ put < 10
 
 что мне интересно
 1. ставка годовых при максимальном отдалении от цены акции
-2. фильтр по объему
-3. открытый интерес, изменение открытого интереса
-4. не типичный объем на контракте
+1. фильтр по объему
+1. открытый интерес, изменение открытого интереса
+1. не типичный объем на контракте
 
 получать открытый интерес от биржи можно по
 Option Contract
