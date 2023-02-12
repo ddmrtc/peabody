@@ -122,6 +122,10 @@ def getThirdFriday(year, month):
     d = d.strftime('%Y-%m-%d')
     return d
 
+def closestDate(dates, givenDate):
+    givenDate = datetime.datetime.strptime(givenDate, "%Y-%m-%d")
+    dates = [datetime.datetime.strptime(d, "%Y-%m-%d") for d in dates]
+    return min(dates, key=lambda x: abs(x - givenDate)).strftime('%Y-%m-%d')
 
 if __name__ == "__main__":
     init()
@@ -154,6 +158,14 @@ if __name__ == "__main__":
         date = m.split('-')
         thirdFriday = getThirdFriday(date[0], date[1])
         logging.info(f'[{ticker}]  3rd Friday is {thirdFriday}')
+        datesInMonth = [x for x in dates if x[0:7] == m]
+        checkFriday = [x for x in datesInMonth if x == thirdFriday]
+        if checkFriday:
+            logging.info(f'[{ticker}] Montly Option in {m} matched: {checkFriday[0]}')
+        else:
+            logging.info(f'[{ticker}] Montly Option in {m} is NOT matched: {thirdFriday} not in {datesInMonth}')
+            closestDate1 = closestDate(datesInMonth, thirdFriday)
+            logging.info(f'[{ticker}] closest date is {closestDate1}')
 
 
     # for d in dates:
