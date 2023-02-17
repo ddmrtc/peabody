@@ -128,7 +128,7 @@ def getOptionTickers(ticker='', expired=False, expiration_date_gt=None, expirati
     return contractsDict
 
 
-def updateOptionTickers(ticker, expired = False):
+def updateOptionTickers(ticker, expired = False, disableUpdate = False):
     typeId = 'contracts'
     if expired:
         expiredFlag = 'Expired '
@@ -137,7 +137,10 @@ def updateOptionTickers(ticker, expired = False):
     file = f'{dataFolder}//{ticker}{typeId}{expiredFlag.strip()}.pickle'
 
     contracts = readFile(file, typeId=typeId, ticker=ticker)
-
+    if disableUpdate:
+        logging.info(f'[{ticker}] updates disabled')
+        return contracts
+    
     if contracts.empty:
         # Загружаем всё
         logging.info(f'[{ticker}] Get {expiredFlag}Contracts')
@@ -164,7 +167,10 @@ def updateOptionTickers(ticker, expired = False):
                     print(contractsNew)
                     writeFile(file, contractsNew, typeId=typeId, ticker=ticker)
             else:
-                logging.info(f'[{ticker}] NO NEW DATA')
+                logging.info(f'[{ticker}] DATA IS EQUALS')
+        else:
+            return contracts
+    return contractsNew
 
 
 
@@ -214,6 +220,56 @@ def closestDate(dates, givenDate):
     return min(dates, key=lambda x: abs(x - givenDate)).strftime('%Y-%m-%d')
 
 
+def setDates(data, ticker):
+    dates = sorted(list(set(data['expiration_date'].to_list())))
+
+    months = sorted(list(set([d[0:7] for d in dates])))
+
+    logging.info(f'[{ticker}] Expiration Dates in {len(months)} months')
+
+    for m in months:
+        logging.info(f'[{ticker}] Check Dates in {m}')
+        date = m.split('-')
+        thirdFriday = getThirdFriday(date[0], date[1])
+        logging.info(f'[{ticker}]  3rd Friday is {thirdFriday}')
+        datesInMonth = [x for x in dates if x[0:7] == m]
+        checkFriday = [x for x in datesInMonth if x == thirdFriday]
+        if checkFriday:
+            logging.info(f'[{ticker}] Montly Option in {m} matched: {checkFriday[0]}')
+            data.loc[data['expiration_date'] == checkFriday[0], 'monthly'] = True
+        else:
+            logging.info(f'[{ticker}] Montly Option in {m} is NOT matched: {thirdFriday} not in {datesInMonth}')
+            closestDate1 = closestDate(datesInMonth, thirdFriday)
+            logging.info(f'[{ticker}] closest date is {closestDate1}')
+            data.loc[data['expiration_date'] == closestDate1, 'monthly'] = True
+#        check = data['monthly']
+#        logging.debug(f'CHECK {len(data[check])}/n{data[check]}')
+
+
+
+def getAggs(ticker):
+    aggs = None
+    while aggs is None:
+        try:
+            aggs = client.get_aggs(ticker, 1, 'day', '2017-01-01', '2024-01-01', limit=50000)
+            time.sleep(6)
+        except exceptions.NoResultsError as e:
+            logging.info(f"{ticker} NO DATA")
+            time.sleep(12)
+            return 0
+        except exceptions.BadResponse as e:
+            logging.info(e)
+            time.sleep(30)
+
+    aggsDict = pandas.DataFrame(aggs)
+    aggsDict['timestamp'] = pandas.to_datetime(aggsDict['timestamp'],unit='ms')
+
+    aggsDict.to_csv(f'candles\{ticker.replace("O:","")}.csv', index = False, sep = ';', decimal = ',', encoding = 'utf-8-sig')
+
+    return len(aggsDict)
+
+
+
 if __name__ == "__main__":
     init()
     logging.info('Started')
@@ -229,48 +285,34 @@ if __name__ == "__main__":
     ticker = 'CVNA'
 
     # Загрузка завершенных=просроченных опционов
-    updateOptionTickers(ticker=ticker, expired=True)
+    contracts = updateOptionTickers(ticker=ticker, expired=True, disableUpdate=True)
+    contracts['expired'] = True
 
     # Загрузка активных опционов
-    updateOptionTickers(ticker=ticker)
+    contractsActive = updateOptionTickers(ticker=ticker, disableUpdate=True)
+    contractsActive['expired'] = False
+ 
+    contracts = pandas.concat([contracts, contractsActive])
+    contracts = contracts.reset_index()
 
-    exit()
+    contracts['monthly'] = False
     
-    logging.info(f'[{ticker}] Get Contracts')
-    contractsNew = getOptionTickers(ticker=ticker, expired=False, expiration_date_gt=expirationDate, sleep=0)
+    setDates(contracts, ticker)
 
-    logging.info(f'[{ticker}] Check Contracts')
-    diff, diff_data = checkPandasDiff(contracts, contractsNew, key='ticker', typeId=typeId)
-    print(diff)
-    print(diff_data)
+    writeFile(f'data/{ticker}contractsAll.pickle', contracts, ticker=ticker)
 
+    monthly = contracts['monthly'] == True
+    
+    logging.info(f'[{ticker}] MONTHLY {len(contracts[monthly])}')
 
-    exit()
-    logging.info(f'[{ticker}] Loading Options Contracts')
-    contractsDict = pandas.read_csv(f'{dataFolder}//{ticker}contracts.csv', sep=';', decimal=',', encoding='utf-8-sig')
+    for i, c in contracts[monthly].iterrows():
+        # print(i)
+        # print(contracts.loc[i])
+        # print(monthly.index)
+        # print(contracts.index)
+        candles = getAggs(c['ticker'])
+        contracts.loc[i, 'candles'] = candles
+        if i % 10 == 0:
+            writeFile(f'data/{ticker}contractsAll.pickle', contracts, ticker=ticker)
 
-    logging.info(f'[{ticker}] Options Contracts:\n{contractsDict}')
-
-    dates = sorted(list(set(contractsDict['expiration_date'].to_list())))
-
-    months = sorted(list(set([d[0:7] for d in dates])))
-
-    logging.info(f'[{ticker}] Expiration Dates in {len(months)} months')
-
-    for m in months:
-        logging.info(f'[{ticker}] Check Dates in {m}')
-        date = m.split('-')
-        thirdFriday = getThirdFriday(date[0], date[1])
-        logging.info(f'[{ticker}]  3rd Friday is {thirdFriday}')
-        datesInMonth = [x for x in dates if x[0:7] == m]
-        checkFriday = [x for x in datesInMonth if x == thirdFriday]
-        if checkFriday:
-            logging.info(f'[{ticker}] Montly Option in {m} matched: {checkFriday[0]}')
-        else:
-            logging.info(f'[{ticker}] Montly Option in {m} is NOT matched: {thirdFriday} not in {datesInMonth}')
-            closestDate1 = closestDate(datesInMonth, thirdFriday)
-            logging.info(f'[{ticker}] closest date is {closestDate1}')
-
-
-    # for d in dates:
-    #     print(d)
+    
