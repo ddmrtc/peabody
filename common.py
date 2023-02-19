@@ -1,5 +1,62 @@
 import logging
 import pandas
+import datetime
+import pathlib
+
+date = datetime.datetime.now()
+dateStr = date.strftime('%Y-%m-%d')
+logFolder = 'log'
+dataFolder = 'data'
+candlesFolder = f'{dataFolder}//candles'
+apiKey = 'DzWlFydCcEwwf48FVMICzRjtRS9_7_h3'
+fromDate = '2021-01-01'
+sleep = 0.01
+sleep429 = 12
+
+pathlib.Path(logFolder).mkdir(parents=True, exist_ok=True)
+pathlib.Path(dataFolder).mkdir(parents=True, exist_ok=True)
+pathlib.Path(candlesFolder).mkdir(parents=True, exist_ok=True)
+
+class MyFormatter(logging.Formatter):
+    converter=datetime.datetime.fromtimestamp
+    def formatTime(self, record, datefmt=None):
+        ct=self.converter(record.created)
+        if datefmt:
+            s=ct.strftime(datefmt)
+        else:
+            t=ct.strftime("%Y-%m-%d %H:%M:%S")
+            s="%s.%03d" % (t, record.msecs)
+        return s
+
+def init(params):
+
+    if params.get('prefix'):
+        fileName = f"{params['name']}-{params.get('prefix')}"
+    else:
+        fileName = params['name']
+
+    log = f"{logFolder}//{fileName}-{date.strftime('%Y-%m-%d-%H-%M-%S')}"
+    log_info = log + '-INFO.log'
+    log = log + '.log'
+
+    logging.basicConfig(level=logging.DEBUG,
+                            format='%(asctime)s.%(msecs)06f - %(funcName)s - %(levelname)s - %(message)s',
+                            datefmt='%H:%M:%S',
+                            handlers=[logging.StreamHandler(),
+                                      logging.FileHandler(log, 'w', 'utf-8-sig'),
+                                      logging.FileHandler(log_info, 'w', 'utf-8-sig'),
+                                      ])
+
+    formatter = MyFormatter(fmt='%(asctime)s - %(funcName)s - %(levelname)s - %(message)s',datefmt='%H:%M:%S.%f')
+
+    logging.getLogger().handlers[0].setLevel(logging.INFO)
+    logging.getLogger().handlers[1].setLevel(logging.DEBUG)
+    logging.getLogger().handlers[2].setLevel(logging.INFO)
+    logging.getLogger('chardet.charsetprober').setLevel(logging.INFO)
+
+    for i in logging.getLogger().handlers:
+        i.setFormatter(formatter)
+
 
 def checkPandasDiff(pandasOld, pandasNew, excludes = [], key = '', typeId = '', checkRemoved = True):
     pandasOld = pandasOld.copy(deep=True)
