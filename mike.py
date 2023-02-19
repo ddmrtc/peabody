@@ -28,8 +28,6 @@ pandas.set_option('display.max_rows', None)
 #
 ############
 
-
-
 class MyFormatter(logging.Formatter):
     converter=datetime.datetime.fromtimestamp
     def formatTime(self, record, datefmt=None):
@@ -44,13 +42,17 @@ class MyFormatter(logging.Formatter):
 name = 'mike'
 prefix = ''
 date = datetime.datetime.now()
+dateStr = date.strftime('%Y-%m-%d')
 logFolder = 'log'
 dataFolder = 'data'
+candlesFolder = f'{dataFolder}//candles'
 apiKey = 'DzWlFydCcEwwf48FVMICzRjtRS9_7_h3'
-expirationDate = '2021-01-01'
+fromDate = '2021-01-01'
+sleep = 0.01
 
 pathlib.Path(logFolder).mkdir(parents=True, exist_ok=True)
 pathlib.Path(dataFolder).mkdir(parents=True, exist_ok=True)
+pathlib.Path(candlesFolder).mkdir(parents=True, exist_ok=True)
 
 def init():
     if prefix:
@@ -58,7 +60,7 @@ def init():
     else:
         fileName = name
 
-    log = f"{logFolder}//{fileName}-{date.strftime('%Y-%m-%d-%H-%M-%S')}"
+    log = f'{logFolder}//{fileName}-{date.strftime("%Y-%m-%d-%H-%M-%S")}'
     log_info = log + '-INFO.log'
     log = log + '.log'
 
@@ -88,7 +90,7 @@ def updateTickers(sleep=0, market='', type=''):
     tickersList = []
 
     for t in tickers:
-        logging.info(f"[{i}] {t.ticker}")
+        logging.info(f'[{i}] {t.ticker}')
         tickersList.append(t.__dict__)
         i += 1
         time.sleep(sleep)
@@ -113,7 +115,7 @@ def getOptionTickers(ticker='', expired=False, expiration_date_gt=None, expirati
     contractsList = []
 
     for c in contracts:
-        logging.info(f"[{ticker}][{i}] {c.ticker}")
+        logging.info(f'[{ticker}][{i}] {c.ticker}')
         contractsList.append(c.__dict__)
         i += 1
         time.sleep(sleep)
@@ -128,50 +130,38 @@ def getOptionTickers(ticker='', expired=False, expiration_date_gt=None, expirati
     return contractsDict
 
 
-def updateOptionTickers(ticker, expired = False, disableUpdate = False):
+def updateOptionTickers(ticker, data, expired = False):
     typeId = 'contracts'
     if expired:
         expiredFlag = 'Expired '
     else:
         expiredFlag = ''
-    file = f'{dataFolder}//{ticker}{typeId}{expiredFlag.strip()}.pickle'
-
-    contracts = readFile(file, typeId=typeId, ticker=ticker)
-    if disableUpdate:
-        logging.info(f'[{ticker}] updates disabled')
-        return contracts
     
-    if contracts.empty:
-        # Загружаем всё
-        logging.info(f'[{ticker}] Get {expiredFlag}Contracts')
-        contractsNew = getOptionTickers(ticker=ticker, expired=expired, expiration_date_gt=expirationDate, sleep=0.01)
-        contractsNew = contractsNew.drop_duplicates(subset='ticker', keep='first')
-        writeFile(file, contractsNew, typeId=typeId, ticker=ticker)
+    # Загружаем с последней даты
+    if expired:
+        expirationDate = sorted(list(set(data['expiration_date'].to_list())))[-1]
+        logging.info(f'[{ticker}] Get {expiredFlag}Contracts from date {expirationDate}')
     else:
-        # Загружаем с последней даты
-        if expired:
-            expirationDate1 = sorted(list(set(contracts['expiration_date'].to_list())))[-1]
-            logging.info(f'[{ticker}] Get {expiredFlag}Contracts from date {expirationDate1}')
-        else:
-            expirationDate1 = expirationDate
-            logging.info(f'[{ticker}] Get {expiredFlag}Contracts')
-        contractsNew = getOptionTickers(ticker=ticker, expired=expired, expiration_date_gt=expirationDate1, sleep=0)
-        contractsNew = contractsNew.drop_duplicates(subset='ticker', keep='first')
-        if not contractsNew.empty:
-            diff, diffData = checkPandasDiff(contracts, contractsNew, key='ticker', typeId=typeId, checkRemoved=False)
-            if diff:
-                logging.info(f'[{ticker}] {{diffData}}')
-                if diffData['add'] > 0:
-                    logging.info(f'[{ticker}] ADDED {diffData["add"]}')
-                    contractsNew = pandas.concat([contracts, contractsNew])
-                    print(contractsNew)
-                    writeFile(file, contractsNew, typeId=typeId, ticker=ticker)
-            else:
-                logging.info(f'[{ticker}] DATA IS EQUALS')
-        else:
-            return contracts
-    return contractsNew
+        expirationDate = fromDate
+        logging.info(f'[{ticker}] Get {expiredFlag}Contracts')
 
+    dataNew = getOptionTickers(ticker=ticker, expired=expired, expiration_date_gt=expirationDate, sleep=sleep)
+    dataNew = dataNew.drop_duplicates(subset='ticker', keep='first')
+
+    if not dataNew.empty:
+        diff, diffData = checkPandasDiff(data, dataNew, key='ticker', typeId=typeId, checkRemoved=False, excludes=['expired', 'monthly'])
+        if diff:
+            logging.info(f'[{ticker}] {diffData}')
+            if diffData['add'] > 0:
+                logging.info(f'[{ticker}] ADDED {diffData["add"]}')
+                if expired:
+                    data = pandas.concat([data, dataNew])
+                else:
+                    data = dataNew
+        else:
+            logging.info(f'[{ticker}] DATA IS EQUALS')
+
+    return data
 
 
 def readFile(file, typeId = '', ticker = ''):
@@ -217,7 +207,9 @@ def getThirdFriday(year, month):
 def closestDate(dates, givenDate):
     givenDate = datetime.datetime.strptime(givenDate, "%Y-%m-%d")
     dates = [datetime.datetime.strptime(d, "%Y-%m-%d") for d in dates]
-    return min(dates, key=lambda x: abs(x - givenDate)).strftime('%Y-%m-%d')
+    closest = min(dates, key=lambda x: abs(x - givenDate))
+    days = abs((givenDate - closest).days)
+    return closest.strftime('%Y-%m-%d'), days
 
 
 def setDates(data, ticker):
@@ -239,35 +231,114 @@ def setDates(data, ticker):
             data.loc[data['expiration_date'] == checkFriday[0], 'monthly'] = True
         else:
             logging.info(f'[{ticker}] Montly Option in {m} is NOT matched: {thirdFriday} not in {datesInMonth}')
-            closestDate1 = closestDate(datesInMonth, thirdFriday)
-            logging.info(f'[{ticker}] closest date is {closestDate1}')
-            data.loc[data['expiration_date'] == closestDate1, 'monthly'] = True
-#        check = data['monthly']
-#        logging.debug(f'CHECK {len(data[check])}/n{data[check]}')
+            closest, days = closestDate(datesInMonth, thirdFriday)
+            if days < 7:
+                logging.info(f'[{ticker}] closest date is {closest}, days: {days}')
+                data.loc[data['expiration_date'] == closest, 'monthly'] = True
+            else:
+                logging.info(f'[{ticker}] closest date {closest} points to next week, it can be monthly')
+    return data
 
 
+def getAggs(ticker, underlyingTicker='', date=''):
+    
+    if underlyingTicker:
+        underlyingTicker += '//'
+    if date:
+        date += '//'
+    candlesPath = f'{candlesFolder}//{underlyingTicker}{date}'
+    pathlib.Path(candlesPath).mkdir(parents=True, exist_ok=True)
+    file = f'{candlesPath}{ticker.replace("O:","")}.csv'
 
-def getAggs(ticker):
+    
+    try:
+        aggs = pandas.read_csv(file, sep = ';', decimal = ',', encoding = 'utf-8-sig')
+        return len(aggs)
+    except:
+        pass
+
     aggs = None
     while aggs is None:
         try:
-            aggs = client.get_aggs(ticker, 1, 'day', '2017-01-01', '2024-01-01', limit=50000)
+            aggs = client.get_aggs(ticker, 1, 'day', fromDate, dateStr, limit=50000)
             time.sleep(6)
         except exceptions.NoResultsError as e:
-            logging.info(f"{ticker} NO DATA")
+            if underlyingTicker:
+                logging.info(f"[{underlyingTicker.replace('//','')}][{ticker}]\tNO DATA")
+            else:
+                logging.info(f"[{ticker}]\tNO DATA")
             time.sleep(12)
             return 0
         except exceptions.BadResponse as e:
             logging.info(e)
             time.sleep(30)
 
-    aggsDict = pandas.DataFrame(aggs)
-    aggsDict['timestamp'] = pandas.to_datetime(aggsDict['timestamp'],unit='ms')
+    aggs = pandas.DataFrame(aggs)
+    aggs['timestamp'] = pandas.to_datetime(aggs['timestamp'],unit='ms')
 
-    aggsDict.to_csv(f'candles\{ticker.replace("O:","")}.csv', index = False, sep = ';', decimal = ',', encoding = 'utf-8-sig')
+    aggs.to_csv(file, index = False, sep = ';', decimal = ',', encoding = 'utf-8-sig')
 
-    return len(aggsDict)
+    return len(aggs)
 
+
+def process(ticker, update = True):
+    # Загрузка данных, которые есть
+    typeId = 'contracts'
+    file = f'{dataFolder}//{ticker}{typeId}.pickle'
+
+    contracts = readFile(file, typeId=typeId, ticker=ticker)
+    if update:
+        if contracts.empty:
+            logging.info(f'[{ticker}] Get Expired Contracts')
+            contracts                   = getOptionTickers(ticker=ticker, expired=True , expiration_date_gt=fromDate, expiration_date_lt='2023-01-01', sleep=sleep)
+            contracts                   = contracts.drop_duplicates(subset='ticker', keep='first')
+            contracts['expired']        = True
+            logging.info(f'[{ticker}] Get Active Contracts')
+            contractsActive             = getOptionTickers(ticker=ticker, expired=False, expiration_date_gt=fromDate, expiration_date_lt='2024-01-01', sleep=sleep)
+            contractsActive             = contractsActive.drop_duplicates(subset='ticker', keep='first')
+            contractsActive['expired']  = False
+            
+            contracts = pandas.concat([contracts, contractsActive], ignore_index=True)
+            contracts = contracts.sort_values(by=['expiration_date', 'ticker'])
+            #contracts = contracts.reset_index()
+            contracts['monthly'] = False
+            contracts = setDates(contracts, ticker)
+            writeFile(file, contracts, ticker=ticker)
+        else:
+            expired = contracts['expired']
+            logging.info(f'[{ticker}] Update {len(contracts[expired])} Expired Contracts')
+            update = updateOptionTickers(ticker, contracts[expired], expired=True)
+            logging.info(f'[{ticker}] Updated {len(update)}')
+            update.loc[update['expired'].isna(), 'expired'] = True
+
+            active = contracts['expired'] == False
+            logging.info(f'[{ticker}] Update {len(contracts[active])} Contracts')
+            updateActive = updateOptionTickers(ticker, contracts[active], expired=False)
+            logging.info(f'[{ticker}] Updated {len(updateActive)}')
+            if 'expired' in updateActive:
+                updateActive.loc[updateActive['expired'].isna(), 'expired'] = False
+            else:
+                updateActive['expired']  = False
+
+            contracts = pandas.concat([update, updateActive], ignore_index=True)
+            contracts = contracts.sort_values(by=['expiration_date', 'ticker'])
+            contracts.loc[contracts['monthly'].isna(), 'monthly'] = False
+            contracts = setDates(contracts, ticker)
+            writeFile(file, contracts, ticker=ticker)
+
+    monthly = contracts['monthly'] == True
+    total = len(contracts[monthly])
+    totalLen = len(str(total))
+    logging.info(f'[{ticker}] MONTHLY {total}')
+    j = 0
+    for i, c in contracts[monthly].iterrows():
+        j += 1
+        logging.info(f"[{ticker}][{j:>{totalLen}}/{total}] {c['expiration_date']} {c['contract_type'].upper():<4} {c['strike_price']}\t{c['ticker']}\t{c.get('candles', None)}")
+        if pandas.isnull(c.get('candles', None)):
+            candles = getAggs(c['ticker'], underlyingTicker=ticker, date=c['expiration_date'])
+            contracts.loc[i, 'candles'] = candles
+            if j % 10 == 0:
+                writeFile(file.replace(typeId,typeId+'1'), contracts, ticker=ticker)
 
 
 if __name__ == "__main__":
@@ -283,36 +354,6 @@ if __name__ == "__main__":
 
     # Работа с контрактами = опцион
     ticker = 'CVNA'
-
-    # Загрузка завершенных=просроченных опционов
-    contracts = updateOptionTickers(ticker=ticker, expired=True, disableUpdate=True)
-    contracts['expired'] = True
-
-    # Загрузка активных опционов
-    contractsActive = updateOptionTickers(ticker=ticker, disableUpdate=True)
-    contractsActive['expired'] = False
- 
-    contracts = pandas.concat([contracts, contractsActive])
-    contracts = contracts.reset_index()
-
-    contracts['monthly'] = False
-    
-    setDates(contracts, ticker)
-
-    writeFile(f'data/{ticker}contractsAll.pickle', contracts, ticker=ticker)
-
-    monthly = contracts['monthly'] == True
-    
-    logging.info(f'[{ticker}] MONTHLY {len(contracts[monthly])}')
-
-    for i, c in contracts[monthly].iterrows():
-        # print(i)
-        # print(contracts.loc[i])
-        # print(monthly.index)
-        # print(contracts.index)
-        candles = getAggs(c['ticker'])
-        contracts.loc[i, 'candles'] = candles
-        if i % 10 == 0:
-            writeFile(f'data/{ticker}contractsAll.pickle', contracts, ticker=ticker)
+    process(ticker, update=False)
 
     
