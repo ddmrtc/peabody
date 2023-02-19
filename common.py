@@ -2,6 +2,8 @@ import logging
 import pandas
 
 def checkPandasDiff(pandasOld, pandasNew, excludes = [], key = '', typeId = '', checkRemoved = True):
+    pandasOld = pandasOld.copy(deep=True)
+    pandasNew = pandasNew.copy(deep=True)
     # функция для того, что бы сравнить два одинаковых pandas
     # вывести
     #   добавленные строчки
@@ -17,6 +19,8 @@ def checkPandasDiff(pandasOld, pandasNew, excludes = [], key = '', typeId = '', 
         exclude = [x for x in excludes if x in pandasOld.columns.tolist()]
         if exclude:
             pandasOld.drop(columns = exclude, inplace = True)
+        exclude = [x for x in excludes if x in pandasNew.columns.tolist()]
+        if exclude:
             pandasNew.drop(columns = exclude, inplace = True)
     # проверяем возможно у нас одинаковые pandas
     if pandasOld.equals(pandasNew):
@@ -105,9 +109,9 @@ def checkPandasDiff(pandasOld, pandasNew, excludes = [], key = '', typeId = '', 
                     diff2 = diff[not_equals & not_nan]
                     for i, row in diff2.iterrows():
                         if column == 'date':
-                            if params['deep_debug']:
-                                logging.debug(type(row[column,'First']))
-                                logging.debug(type(row[column,'Second']))
+                            # if params['deep_debug']:
+                            #     logging.debug(type(row[column,'First']))
+                            #     logging.debug(type(row[column,'Second']))
                             if row[column,'First'][0:19] == row[column,'Second'][0:19]:
                                 logging.info(f"CHANGED {typeId.upper():<20} {i:<20} {column:<20} {row[column,'First']:<32} {'->':^5} {row[column,'Second']:<32} DATE CHECK PASSED {row[column,'First'][0:19]}")
                                 skipped += 1
@@ -128,10 +132,10 @@ def checkPandasDiff(pandasOld, pandasNew, excludes = [], key = '', typeId = '', 
                                 removed += diff2_data['remove']
                                 changed += diff2_data['change']
                         else:
-                            if params['deep_debug']:
-                                logging.debug(row)
+                            # if params['deep_debug']:
+                            #     logging.debug(row)
                             logging.info(f"CHANGED {typeId.upper():<20} {i:<20} {column:<20} {row[column,'First']:<10} {'->':^10} {row[column,'Second']:<10}")
-                            message = {'typeId': typeId, 'key': settings['key'], 'id': i, 'action': 'change', 'data': {column: row[column,'Second']}, 'data_old': {column: row[column,'First']}}
+                            message = {'typeId': typeId, 'key': key, 'id': i, 'action': 'change', 'data': {column: row[column,'Second']}, 'data_old': {column: row[column,'First']}}
                             if messages:
                                 message_from_messages = [x for x in messages if x['id'] == i]
                                 if message_from_messages:
